@@ -162,6 +162,7 @@ def train(model, linear_classifier, optimizer, loader, epoch, n, avgpool):
 
         # forward
         with torch.no_grad():
+            # breakpoint()
             if "vit" in args.arch:
                 intermediate_output = model.get_intermediate_layers(inp, n)
                 output = torch.cat([x[:, 0] for x in intermediate_output], dim=-1)

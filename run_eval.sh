@@ -1,0 +1,1 @@
+torchrun --standalone eval_linear.py --data_path /media/dataset1/ImageNet2012

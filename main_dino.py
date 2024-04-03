@@ -34,6 +34,8 @@ import utils
 import vision_transformer as vits
 from vision_transformer import DINOHead
 
+from torchvision.utils import save_image 
+
 torchvision_archs = sorted(name for name in torchvision_models.__dict__
     if name.islower() and not name.startswith("__")
     and callable(torchvision_models.__dict__[name]))
@@ -87,7 +89,7 @@ def get_args_parser():
     parser.add_argument('--clip_grad', type=float, default=3.0, help="""Maximal parameter
         gradient norm if using gradient clipping. Clipping with norm .3 ~ 1.0 can
         help optimization for larger ViT architectures. 0 for disabling.""")
-    parser.add_argument('--batch_size_per_gpu', default=64, type=int,
+    parser.add_argument('--batch_size_per_gpu', default=4, type=int,
         help='Per-GPU batch-size : number of distinct images loaded on one GPU.')
     parser.add_argument('--epochs', default=100, type=int, help='Number of epochs of training.')
     parser.add_argument('--freeze_last_layer', default=1, type=int, help="""Number of epochs
@@ -142,6 +144,7 @@ def train_dino(args):
         args.local_crops_scale,
         args.local_crops_number,
     )
+    
     dataset = datasets.ImageFolder(args.data_path, transform=transform)
     sampler = torch.utils.data.DistributedSampler(dataset, shuffle=True)
     data_loader = torch.utils.data.DataLoader(
@@ -303,7 +306,13 @@ def train_one_epoch(student, teacher, teacher_without_ddp, dino_loss, data_loade
                     fp16_scaler, args):
     metric_logger = utils.MetricLogger(delimiter="  ")
     header = 'Epoch: [{}/{}]'.format(epoch, args.epochs)
-    for it, (images, _) in enumerate(metric_logger.log_every(data_loader, 10, header)):
+    for it, (images, _) in enumerate(metric_logger.log_every(data_loader, 10, header)):     # 한번의 10개의 img를 뽑아. where images[0]:(b,3,224,224)
+        
+        # JINLOVESPHO - visualize img
+        # for i in range(len(images)):
+        #     save_image(images[i], f'./vis_img/i{i}.jpg')
+        # breakpoint()
+    
         # update weight decay and learning rate according to their schedule
         it = len(data_loader) * epoch + it  # global training iteration
         for i, param_group in enumerate(optimizer.param_groups):
@@ -312,11 +321,13 @@ def train_one_epoch(student, teacher, teacher_without_ddp, dino_loss, data_loade
                 param_group["weight_decay"] = wd_schedule[it]
 
         # move images to gpu
-        images = [im.cuda(non_blocking=True) for im in images]
+        images = [im.cuda(non_blocking=True) for im in images]      # batch_size=64
         # teacher and student forward passes + compute dino loss
         with torch.cuda.amp.autocast(fp16_scaler is not None):
-            teacher_output = teacher(images[:2])  # only the 2 global views pass through the teacher
-            student_output = student(images)
+            # breakpoint()
+            teacher_output = teacher(images[:2])  # (2b,1,65536)   # only the 2 global views pass through the teacher    
+            student_output = student(images)      # (10b, 1, 65536)
+            breakpoint()
             loss = dino_loss(student_output, teacher_output, epoch)
 
         if not math.isfinite(loss.item()):
@@ -381,6 +392,7 @@ class DINOLoss(nn.Module):
         """
         Cross-entropy between softmax outputs of the teacher and student networks.
         """
+        breakpoint()
         student_out = student_output / self.student_temp
         student_out = student_out.chunk(self.ncrops)
 
@@ -391,14 +403,15 @@ class DINOLoss(nn.Module):
 
         total_loss = 0
         n_loss_terms = 0
-        for iq, q in enumerate(teacher_out):
-            for v in range(len(student_out)):
+        for iq, q in enumerate(teacher_out):        # len(teacher_out)=2, teacher_out[0].shape=(b,1,65536)
+            for v in range(len(student_out)):       # student[0]~student[9] shape=(b,1,65536)
                 if v == iq:
                     # we skip cases where student and teacher operate on the same view
                     continue
                 loss = torch.sum(-q * F.log_softmax(student_out[v], dim=-1), dim=-1)
                 total_loss += loss.mean()
                 n_loss_terms += 1
+        breakpoint()
         total_loss /= n_loss_terms
         self.update_center(teacher_output)
         return total_loss

@@ -167,22 +167,26 @@ if __name__ == '__main__':
         pth_transforms.ToTensor(),
         pth_transforms.Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225)),
     ])
-    img = transform(img)
+    img = transform(img)    # img.shape (3,480,480)
 
     # make the image divisible by the patch size
     w, h = img.shape[1] - img.shape[1] % args.patch_size, img.shape[2] - img.shape[2] % args.patch_size
     img = img[:, :w, :h].unsqueeze(0)
 
-    w_featmap = img.shape[-2] // args.patch_size
+    # patch_size=8
+    w_featmap = img.shape[-2] // args.patch_size    # 480/8 = 60
     h_featmap = img.shape[-1] // args.patch_size
+    
+    # 총 patch개수 60*60 = 3600
 
     attentions = model.get_last_selfattention(img.to(device))
-
+    breakpoint()
+    
     nh = attentions.shape[1] # number of head
 
     # we keep only the output patch attention
-    attentions = attentions[0, :, 0, 1:].reshape(nh, -1)
-
+    attentions = attentions[0, :, 0, 1:].reshape(nh, -1)        # attentions.shape (b,h,n+1,n+1) 인데, 여기서 각 head의 cls token을
+                                                                # 가져오되 cls token이 자기 자신을 제외한 다른 patch들과 attend한 row를 가져와 O
     if args.threshold is not None:
         # we keep only a certain percentage of the mass
         val, idx = torch.sort(attentions)
@@ -196,8 +200,8 @@ if __name__ == '__main__':
         # interpolate
         th_attn = nn.functional.interpolate(th_attn.unsqueeze(0), scale_factor=args.patch_size, mode="nearest")[0].cpu().numpy()
 
-    attentions = attentions.reshape(nh, w_featmap, h_featmap)
-    attentions = nn.functional.interpolate(attentions.unsqueeze(0), scale_factor=args.patch_size, mode="nearest")[0].cpu().numpy()
+    attentions = attentions.reshape(nh, w_featmap, h_featmap)   # 다시 2d spatial patch 형태로 되돌리고
+    attentions = nn.functional.interpolate(attentions.unsqueeze(0), scale_factor=args.patch_size, mode="nearest")[0].cpu().numpy()  # 그리고 다시 patch level -> pixel level로 되돌리기 위해 interpolate 했구나! 
 
     # save attentions heatmaps
     os.makedirs(args.output_dir, exist_ok=True)
